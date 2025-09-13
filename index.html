@@ -18,24 +18,25 @@
       /* Viewer fills the screen */
       #viewer {
         position: fixed;
-        inset: 0;
+        top: 0; right: 0; bottom: 0; left: 0; /* avoid 'inset' for older TVs */
         background: #000;
         overflow: hidden;
+        z-index: 1;
       }
       .layer {
         position: absolute;
-        inset: 0;
+        top: 0; right: 0; bottom: 0; left: 0; /* avoid 'inset' for older TVs */
         display: flex;
         align-items: center;
         justify-content: center;
         opacity: 0;
-        transition: opacity var(--fade, 800ms) linear;
+        transition: opacity 800ms linear; /* no CSS variables for older TVs */
         will-change: opacity;
       }
       .layer.visible { opacity: 1; }
       .layer img {
-        width: 100vw;
-        height: 100vh;
+        width: 100%;
+        height: 100%;
         object-fit: contain; /* Avoid cropping; change to 'cover' if preferred */
         background: #000;
       }
@@ -51,10 +52,11 @@
         align-items: center;
         padding: 8px 12px;
         background: rgba(0,0,0,0.5);
-        backdrop-filter: blur(2px);
+        /* avoid backdrop-filter for broader TV support */
         color: #fff;
         font-size: 14px;
         transition: transform 200ms ease-out, opacity 200ms ease-out;
+        z-index: 2;
       }
       #controls.hidden { transform: translateY(100%); opacity: 0; }
       #controls button, #controls select, #controls input[type="number"] {
@@ -173,13 +175,18 @@
 
         function hasImageExt(name) {
           var lower = name.toLowerCase();
-          for (var i=0;i<SUPPORTED_EXT.length;i++) if (lower.endsWith(SUPPORTED_EXT[i])) return true;
+          for (var i=0;i<SUPPORTED_EXT.length;i++) {
+            var ext = SUPPORTED_EXT[i];
+            if (lower.slice(-ext.length) === ext) return true; // avoid endsWith for old TVs
+          }
           return false;
         }
 
         function applyFadeMs(ms) {
           state.fadeMs = ms;
-          document.documentElement.style.setProperty('--fade', ms + 'ms');
+          // Update duration directly for older browsers (no CSS vars)
+          layerA.style.transitionDuration = ms + 'ms';
+          layerB.style.transitionDuration = ms + 'ms';
         }
 
         function applyDurationSec(sec) {
@@ -199,13 +206,9 @@
           saveSettings();
         }
 
-        function preload(url) {
-          return new Promise(function(resolve, reject){
-            var img = new Image();
-            img.onload = function(){ resolve(img); };
-            img.onerror = function(){ reject(new Error('Failed to load ' + url)); };
-            img.src = url;
-          });
+        function absoluteUrl(path) {
+          try { return new URL(path, window.location.href).toString(); }
+          catch (e) { return path; }
         }
 
         function currentLayer() { return state.activeLayer === 'A' ? layerA : layerB; }
@@ -214,23 +217,45 @@
         function nextImg() { return state.activeLayer === 'A' ? imgB : imgA; }
 
         function crossfadeTo(url, instant) {
-          return preload(url).then(function(){
+          return new Promise(function(resolve){
             var cur = currentLayer();
             var nxt = nextLayer();
             var nimg = nextImg();
-            nimg.src = url;
-            // Force reflow before toggling visibility for reliable transition
-            void nxt.offsetWidth;
-            if (instant) {
-              cur.classList.remove('visible');
+            var resolved = absoluteUrl(url);
+
+            // Prepare handlers
+            var done = false;
+            function swap() {
+              if (done) return; done = true;
+              // Force reflow to apply transition reliably
+              void nxt.offsetWidth;
               nxt.classList.add('visible');
-            } else {
-              nxt.classList.add('visible');
               cur.classList.remove('visible');
+              state.activeLayer = state.activeLayer === 'A' ? 'B' : 'A';
+              resolve();
             }
-            state.activeLayer = state.activeLayer === 'A' ? 'B' : 'A';
-          }).catch(function(err){
-            console.warn(err);
+            function fail() {
+              if (done) return; done = true;
+              console.warn('Failed to load', resolved);
+              setStatus('Failed to load image');
+              resolve();
+            }
+
+            // Attach events BEFORE setting src
+            nimg.onload = swap;
+            nimg.onerror = fail;
+            try { nimg.decoding = 'async'; } catch (e) {}
+            try { nimg.loading = 'eager'; } catch (e) {}
+            nimg.src = resolved;
+
+            // If instant, don't wait for load to show the layer
+            if (instant) {
+              swap();
+            } else {
+              // Fallback in case 'load' never fires on some TVs
+              setTimeout(function(){ if (!done && nimg.complete) swap(); }, 1500);
+              setTimeout(function(){ if (!done) swap(); }, Math.max(2500, state.fadeMs + 1200));
+            }
           });
         }
 
@@ -465,12 +490,6 @@
         start();
       })();
     </script>
-    <noscript>
-      JavaScript is required to run the slideshow.
-    </noscript>
-    <div id="help" style="position:fixed;left:8px;top:8px;opacity:.6">
-      Tip: Place images in <code>images/</code>. Optional: add <code>images/manifest.json</code> with
-      <code>["file1.jpg","file2.png"]</code> or <code>{"images":[...]}</code> for best compatibility.
-    </div>
+    <noscript>JavaScript is required to run the slideshow.</noscript>
   </body>
   </html>
