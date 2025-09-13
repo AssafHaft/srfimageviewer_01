@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reception TV Image Viewer</title>
+    <meta name="color-scheme" content="dark light" />
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: #fff;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      /* Viewer fills the screen */
+      #viewer {
+        position: fixed;
+        inset: 0;
+        background: #000;
+        overflow: hidden;
+      }
+      .layer {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity var(--fade, 800ms) linear;
+        will-change: opacity;
+      }
+      .layer.visible { opacity: 1; }
+      .layer img {
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain; /* Avoid cropping; change to 'cover' if preferred */
+        background: #000;
+      }
+
+      /* Minimal control bar */
+      #controls {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 8px 12px;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(2px);
+        color: #fff;
+        font-size: 14px;
+        transition: transform 200ms ease-out, opacity 200ms ease-out;
+      }
+      #controls.hidden { transform: translateY(100%); opacity: 0; }
+      #controls button, #controls select, #controls input[type="number"] {
+        background: #111;
+        color: #fff;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 6px 10px;
+      }
+      #controls button { cursor: pointer; }
+      #status { margin-left: auto; opacity: 0.8; }
+      #help { font-size: 12px; opacity: 0.8; }
+
+      a, a:visited { color: #9ad; }
+
+      /* No mouse on TVs; keep controls visible initially */
+      @media (hover:hover) and (pointer:fine) {
+        #controls.hidden { opacity: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer" aria-live="off">
+      <div class="layer" id="layerA"><img alt="" /></div>
+      <div class="layer" id="layerB"><img alt="" /></div>
+    </div>
+
+    <div id="controls" class="hidden" role="group" aria-label="Controls">
+      <button id="btnPlayPause" title="Play / Pause">Play</button>
+      <button id="btnPrev" title="Previous">Prev</button>
+      <button id="btnNext" title="Next">Next</button>
+      <label>
+        Mode
+        <select id="mode">
+          <option value="slideshow">Slideshow (all)</option>
+          <option value="single">Single image</option>
+        </select>
+      </label>
+      <label>
+        Image
+        <select id="imageSelect" disabled></select>
+      </label>
+      <label>
+        Duration s
+        <input id="duration" type="number" min="2" max="120" step="1" value="8" />
+      </label>
+      <label>
+        Fade ms
+        <input id="fade" type="number" min="0" max="5000" step="100" value="800" />
+      </label>
+      <button id="btnFullscreen" title="Fullscreen">Fullscreen</button>
+      <button id="btnRefresh" title="Reload image list">Refresh</button>
+      <div id="status" aria-live="polite"></div>
+    </div>
+
+    <script>
+      (function () {
+        var SUPPORTED_EXT = [".jpg",".jpeg",".png",".gif",".webp",".bmp",".svg"]; // svg allowed
+        var IMAGES_DIR = "images/";
+        var state = {
+          list: [],
+          index: 0,
+          playing: true,
+          timer: null,
+          fadeMs: 800,
+          durationSec: 8,
+          mode: 'slideshow', // or 'single'
+          lastMouse: Date.now(),
+          activeLayer: 'A'
+        };
+
+        var layerA = document.getElementById('layerA');
+        var layerB = document.getElementById('layerB');
+        var imgA = layerA.querySelector('img');
+        var imgB = layerB.querySelector('img');
+        var controls = document.getElementById('controls');
+        var btnPlayPause = document.getElementById('btnPlayPause');
+        var btnPrev = document.getElementById('btnPrev');
+        var btnNext = document.getElementById('btnNext');
+        var btnFullscreen = document.getElementById('btnFullscreen');
+        var btnRefresh = document.getElementById('btnRefresh');
+        var selMode = document.getElementById('mode');
+        var selImage = document.getElementById('imageSelect');
+        var inpDuration = document.getElementById('duration');
+        var inpFade = document.getElementById('fade');
+        var statusEl = document.getElementById('status');
+
+        function saveSettings() {
+          try {
+            localStorage.setItem('srf_tv_settings', JSON.stringify({
+              mode: state.mode,
+              durationSec: state.durationSec,
+              fadeMs: state.fadeMs,
+              selected: state.list[state.index] || null
+            }));
+          } catch (e) {}
+        }
+        function loadSettings() {
+          try {
+            var s = JSON.parse(localStorage.getItem('srf_tv_settings') || 'null');
+            if (!s) return;
+            if (s.durationSec) inpDuration.value = s.durationSec;
+            if (s.fadeMs) inpFade.value = s.fadeMs;
+            if (s.mode) selMode.value = s.mode;
+          } catch (e) {}
+        }
+
+        function setStatus(msg) { statusEl.textContent = msg || ''; }
+
+        function sleep(ms, signal) {
+          return new Promise(function(resolve){
+            var id = setTimeout(resolve, ms);
+            if (signal) signal.addEventListener('abort', function(){ clearTimeout(id); resolve(); });
+          });
+        }
+
+        function hasImageExt(name) {
+          var lower = name.toLowerCase();
+          for (var i=0;i<SUPPORTED_EXT.length;i++) if (lower.endsWith(SUPPORTED_EXT[i])) return true;
+          return false;
+        }
+
+        function applyFadeMs(ms) {
+          state.fadeMs = ms;
+          document.documentElement.style.setProperty('--fade', ms + 'ms');
+        }
+
+        function applyDurationSec(sec) {
+          state.durationSec = sec;
+        }
+
+        function setMode(mode) {
+          state.mode = mode;
+          selImage.disabled = mode !== 'single';
+          if (mode === 'single') {
+            // Freeze on current selection
+            pause();
+            showIndex(selImage.selectedIndex >= 0 ? selImage.selectedIndex : 0, true);
+          } else {
+            play();
+          }
+          saveSettings();
+        }
+
+        function preload(url) {
+          return new Promise(function(resolve, reject){
+            var img = new Image();
+            img.onload = function(){ resolve(img); };
+            img.onerror = function(){ reject(new Error('Failed to load ' + url)); };
+            img.src = url;
+          });
+        }
+
+        function currentLayer() { return state.activeLayer === 'A' ? layerA : layerB; }
+        function nextLayer() { return state.activeLayer === 'A' ? layerB : layerA; }
+        function currentImg() { return state.activeLayer === 'A' ? imgA : imgB; }
+        function nextImg() { return state.activeLayer === 'A' ? imgB : imgA; }
+
+        function crossfadeTo(url, instant) {
+          return preload(url).then(function(){
+            var cur = currentLayer();
+            var nxt = nextLayer();
+            var nimg = nextImg();
+            nimg.src = url;
+            // Force reflow before toggling visibility for reliable transition
+            void nxt.offsetWidth;
+            if (instant) {
+              cur.classList.remove('visible');
+              nxt.classList.add('visible');
+            } else {
+              nxt.classList.add('visible');
+              cur.classList.remove('visible');
+            }
+            state.activeLayer = state.activeLayer === 'A' ? 'B' : 'A';
+          }).catch(function(err){
+            console.warn(err);
+          });
+        }
+
+        function showIndex(idx, instant) {
+          if (!state.list.length) return;
+          if (idx < 0) idx = state.list.length - 1;
+          if (idx >= state.list.length) idx = 0;
+          state.index = idx;
+          setStatus((idx+1) + '/' + state.list.length);
+          return crossfadeTo(state.list[idx], instant);
+        }
+
+        function next() {
+          if (!state.list.length) return;
+          var idx = (state.index + 1) % state.list.length;
+          return showIndex(idx, false);
+        }
+        function prev() {
+          if (!state.list.length) return;
+          var idx = (state.index - 1 + state.list.length) % state.list.length;
+          return showIndex(idx, false);
+        }
+
+        function clearTimer() { if (state.timer) { clearTimeout(state.timer); state.timer = null; } }
+
+        function scheduleNext() {
+          clearTimer();
+          if (!state.playing) return;
+          if (state.mode === 'single') return; // no advance
+          if (state.list.length <= 1) return; // nothing to loop
+          state.timer = setTimeout(function(){ next().then(scheduleNext); }, Math.max(0, (state.durationSec * 1000)));
+        }
+
+        function play() {
+          if (!state.list.length) return;
+          state.playing = true;
+          btnPlayPause.textContent = 'Pause';
+          scheduleNext();
+        }
+        function pause() {
+          state.playing = false;
+          btnPlayPause.textContent = 'Play';
+          clearTimer();
+        }
+
+        function togglePlay() { state.playing ? pause() : play(); }
+
+        function populateSelect(list, selectedUrl) {
+          selImage.innerHTML = '';
+          for (var i=0;i<list.length;i++) {
+            var opt = document.createElement('option');
+            var url = list[i];
+            opt.value = url;
+            opt.textContent = url.replace(/^.*\//, '');
+            if (selectedUrl && url === selectedUrl) opt.selected = true;
+            selImage.appendChild(opt);
+          }
+        }
+
+        function buildListFromDirectoryIndex(htmlText) {
+          try {
+            var tmp = document.implementation.createHTMLDocument('dir');
+            tmp.documentElement.innerHTML = htmlText;
+            var anchors = tmp.querySelectorAll('a[href]');
+            var urls = [];
+            for (var i=0;i<anchors.length;i++) {
+              var href = anchors[i].getAttribute('href');
+              if (!href || href.indexOf('?') !== -1) continue;
+              if (href.indexOf('..') !== -1) continue;
+              if (href.startsWith('/')) continue;
+              if (!hasImageExt(href)) continue;
+              urls.push(IMAGES_DIR + href);
+            }
+            // Deduplicate
+            var seen = {};
+            var unique = [];
+            for (var j=0;j<urls.length;j++) if (!seen[urls[j]]) { seen[urls[j]] = true; unique.push(urls[j]); }
+            return unique;
+          } catch (e) {
+            return [];
+          }
+        }
+
+        function fetchJson(url) {
+          return fetch(url, {cache:'no-store'}).then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+        }
+        function fetchText(url) {
+          return fetch(url, {cache:'no-store'}).then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
+        }
+
+        function uniqueFilter(arr) {
+          var out = []; var seen = {};
+          for (var i=0;i<arr.length;i++) if (!seen[arr[i]]) { seen[arr[i]] = true; out.push(arr[i]); }
+          return out;
+        }
+
+        function normalizeList(list) {
+          var out = [];
+          for (var i=0;i<list.length;i++) {
+            var v = list[i];
+            if (!v) continue;
+            if (typeof v === 'string') {
+              if (v.indexOf('://') === -1 && !v.startsWith(IMAGES_DIR)) v = IMAGES_DIR + v.replace(/^\/+/, '');
+              if (!hasImageExt(v)) continue;
+              out.push(v);
+            }
+          }
+          return uniqueFilter(out);
+        }
+
+        function loadList() {
+          setStatus('Loading images...');
+          // Try manifest first
+          return fetchJson(IMAGES_DIR + 'manifest.json')
+            .then(function(json){
+              var list = normalizeList(json && json.images ? json.images : json);
+              if (!list.length) throw new Error('Empty manifest');
+              return list;
+            })
+            .catch(function(){
+              // Try to parse directory listing
+              return fetchText(IMAGES_DIR).then(function(html){
+                var list = buildListFromDirectoryIndex(html);
+                if (!list.length) throw new Error('No images found');
+                return list;
+              });
+            })
+            .catch(function(){
+              setStatus('No images found in "' + IMAGES_DIR + '".');
+              return [];
+            });
+        }
+
+        function initKeyboard() {
+          window.addEventListener('keydown', function(e){
+            var k = e.key || e.code;
+            if (k === ' ' || k === 'Space') { togglePlay(); e.preventDefault(); }
+            else if (k === 'ArrowRight') { pause(); next(); }
+            else if (k === 'ArrowLeft') { pause(); prev(); }
+            else if (k === 'f' || k === 'F') { requestFullscreen(); }
+          });
+        }
+
+        function requestFullscreen() {
+          var el = document.documentElement;
+          var fn = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+          if (fn) try { fn.call(el); } catch(e) {}
+        }
+
+        function autoHideControls() {
+          function show() { controls.classList.remove('hidden'); }
+          function hide() { controls.classList.add('hidden'); }
+          var hideDelay = 2200;
+          function onMove(){
+            show();
+            state.lastMouse = Date.now();
+          }
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('touchstart', onMove, {passive:true});
+          setInterval(function(){ if (Date.now() - state.lastMouse > hideDelay) hide(); }, 500);
+          // Show at start
+          show();
+          setTimeout(hide, hideDelay);
+        }
+
+        function wireControls() {
+          btnPlayPause.addEventListener('click', togglePlay);
+          btnPrev.addEventListener('click', function(){ pause(); prev(); });
+          btnNext.addEventListener('click', function(){ pause(); next(); });
+          btnFullscreen.addEventListener('click', requestFullscreen);
+          btnRefresh.addEventListener('click', function(){
+            pause();
+            start(true);
+          });
+          selMode.addEventListener('change', function(){ setMode(this.value); });
+          selImage.addEventListener('change', function(){
+            var idx = selImage.selectedIndex;
+            if (idx >= 0) { pause(); showIndex(idx, false); saveSettings(); }
+          });
+          inpDuration.addEventListener('change', function(){ applyDurationSec(Math.max(2, parseInt(this.value,10)||8)); saveSettings(); });
+          inpFade.addEventListener('change', function(){ applyFadeMs(Math.max(0, parseInt(this.value,10)||800)); saveSettings(); });
+        }
+
+        function start(forceReload) {
+          loadSettings();
+          applyFadeMs(parseInt(inpFade.value,10)||800);
+          applyDurationSec(parseInt(inpDuration.value,10)||8);
+          state.playing = true;
+          btnPlayPause.textContent = 'Pause';
+          setStatus('Loading images...');
+          return loadList().then(function(list){
+            state.list = list;
+            if (!list.length) {
+              // Clear images
+              imgA.removeAttribute('src');
+              imgB.removeAttribute('src');
+              layerA.classList.remove('visible');
+              layerB.classList.remove('visible');
+              btnPlayPause.textContent = 'Play';
+              return;
+            }
+            // Build select
+            populateSelect(list);
+
+            // Restore mode and selected if available
+            try {
+              var s = JSON.parse(localStorage.getItem('srf_tv_settings') || 'null');
+              if (s && s.selected) {
+                var restoredIndex = list.indexOf(s.selected);
+                if (restoredIndex >= 0) selImage.selectedIndex = restoredIndex;
+              }
+            } catch (e) {}
+
+            // Initial show instantly to avoid black flash
+            state.activeLayer = 'A';
+            layerB.classList.remove('visible');
+            layerA.classList.add('visible');
+            return showIndex(selMode.value === 'single' && selImage.selectedIndex >= 0 ? selImage.selectedIndex : 0, true).then(function(){
+              if (selMode.value === 'single') { setMode('single'); }
+              else { setMode('slideshow'); play(); }
+            });
+          }).catch(function(err){
+            console.warn(err);
+            setStatus('Error loading images');
+          });
+        }
+
+        // Boot
+        initKeyboard();
+        wireControls();
+        autoHideControls();
+        start();
+      })();
+    </script>
+    <noscript>
+      JavaScript is required to run the slideshow.
+    </noscript>
+    <div id="help" style="position:fixed;left:8px;top:8px;opacity:.6">
+      Tip: Place images in <code>images/</code>. Optional: add <code>images/manifest.json</code> with
+      <code>["file1.jpg","file2.png"]</code> or <code>{"images":[...]}</code> for best compatibility.
+    </div>
+  </body>
+  </html>
