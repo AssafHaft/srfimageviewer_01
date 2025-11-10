@@ -555,8 +555,9 @@
 
         function loadList() {
           setStatus('Loading images...');
-          // Try manifest first
-          return fetchJson(IMAGES_DIR + 'manifest.json')
+          // Try manifest first with cache busting
+          var cacheBuster = '?t=' + Date.now();
+          return fetchJson(IMAGES_DIR + 'manifest.json' + cacheBuster)
             .then(function(json){
               var list = normalizeList(json && json.images ? json.images : json);
               if (!list.length) throw new Error('Empty manifest');
@@ -819,10 +820,23 @@
             uploadBtn.disabled = true;
             uploadBtn.textContent = 'Upload Selected';
             if (success > 0) {
+              showMessage(uploadStatus, 'Updating manifest...', 'info');
               updateManifest(token, repo).then(function() {
-                loadImageList();
-                // Refresh the viewer
-                if (window.refreshViewer) window.refreshViewer();
+                showMessage(uploadStatus, 'Manifest updated! Refreshing...', 'success');
+                // Wait a moment for GitHub Pages to update, then refresh
+                setTimeout(function() {
+                  loadImageList();
+                  // Refresh the viewer with cache busting
+                  if (window.refreshViewer) window.refreshViewer();
+                }, 2000);
+              }).catch(function(err) {
+                showMessage(uploadStatus, 'Manifest update failed: ' + err.message + '. You may need to refresh manually.', 'error');
+                console.error('Manifest update error:', err);
+                // Still try to refresh the list
+                setTimeout(function() {
+                  loadImageList();
+                  if (window.refreshViewer) window.refreshViewer();
+                }, 2000);
               });
             }
           }).catch(function(err) {
@@ -841,35 +855,37 @@
               var filename = file.name;
               var path = IMAGES_DIR + filename;
 
-              // Get file SHA if exists (for update)
-              getFileSha(repo, path, token).then(function(sha) {
-                var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
-                var body = {
-                  message: 'Add/update image: ' + filename,
-                  content: base64,
-                  branch: 'main'
-                };
-                if (sha) body.sha = sha;
+              // Get default branch and file SHA if exists (for update)
+              getDefaultBranch(repo, token).then(function(branch) {
+                return getFileSha(repo, path, token, branch).then(function(sha) {
+                  var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+                  var body = {
+                    message: 'Add/update image: ' + filename,
+                    content: base64,
+                    branch: branch
+                  };
+                  if (sha) body.sha = sha;
 
-                fetch(url, {
-                  method: 'PUT',
-                  headers: {
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(body)
-                }).then(function(res) {
-                  if (!res.ok) {
-                    return res.json().then(function(err) {
-                      throw new Error(err.message || 'Upload failed');
-                    });
-                  }
-                  return res.json();
-                }).then(function(data) {
-                  resolve({success: true, filename: filename});
-                }).catch(function(err) {
-                  resolve({success: false, filename: filename, error: err.message});
+                  return fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                      'Authorization': 'token ' + token,
+                      'Accept': 'application/vnd.github.v3+json',
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                  }).then(function(res) {
+                    if (!res.ok) {
+                      return res.json().then(function(err) {
+                        throw new Error(err.message || 'Upload failed');
+                      });
+                    }
+                    return res.json();
+                  }).then(function(data) {
+                    resolve({success: true, filename: filename});
+                  }).catch(function(err) {
+                    resolve({success: false, filename: filename, error: err.message});
+                  });
                 });
               }).catch(function(err) {
                 resolve({success: false, filename: filename, error: err.message});
@@ -879,8 +895,9 @@
           });
         }
 
-        function getFileSha(repo, path, token) {
+        function getFileSha(repo, path, token, branch) {
           var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+          if (branch) url += '?ref=' + encodeURIComponent(branch);
           return fetch(url, {
             headers: {
               'Authorization': 'token ' + token,
@@ -897,104 +914,124 @@
 
         function deleteFile(filename, token, repo) {
           var path = IMAGES_DIR + filename;
-          return getFileSha(repo, path, token).then(function(sha) {
-            if (!sha) {
-              throw new Error('File not found');
-            }
-            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
-            return fetch(url, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                message: 'Delete image: ' + filename,
-                sha: sha,
-                branch: 'main'
-              })
-            }).then(function(res) {
-              if (!res.ok) {
-                return res.json().then(function(err) {
-                  throw new Error(err.message || 'Delete failed');
-                });
+          return getDefaultBranch(repo, token).then(function(branch) {
+            return getFileSha(repo, path, token, branch).then(function(sha) {
+              if (!sha) {
+                throw new Error('File not found');
               }
-              return res.json();
+              var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+              return fetch(url, {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': 'token ' + token,
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  message: 'Delete image: ' + filename,
+                  sha: sha,
+                  branch: branch
+                })
+              }).then(function(res) {
+                if (!res.ok) {
+                  return res.json().then(function(err) {
+                    throw new Error(err.message || 'Delete failed');
+                  });
+                }
+                return res.json();
+              });
             });
           });
         }
 
+        function getDefaultBranch(repo, token) {
+          // Try to get default branch from repo info
+          return fetch(GITHUB_API + '/repos/' + repo, {
+            headers: {
+              'Authorization': 'token ' + token,
+              'Accept': 'application/vnd.github.v3+json'
+            }
+          }).then(function(res) {
+            if (!res.ok) return 'main'; // fallback
+            return res.json().then(function(data) {
+              return data.default_branch || 'main';
+            });
+          }).catch(function() {
+            return 'main'; // fallback
+          });
+        }
+
         function updateManifest(token, repo) {
-          // Load current manifest or get file list
-          return fetch(IMAGES_DIR + 'manifest.json', {cache: 'no-store'})
-            .then(function(res) { return res.ok ? res.json() : null; })
-            .catch(function() { return null; })
-            .then(function(manifest) {
-              // Get all files from repo
-              var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR);
-              return fetch(url, {
-                headers: {
-                  'Authorization': 'token ' + token,
-                  'Accept': 'application/vnd.github.v3+json'
-                }
-              }).then(function(res) {
-                if (!res.ok) throw new Error('Failed to list files');
-                return res.json();
-              }).then(function(files) {
-                var images = [];
-                var supportedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-                for (var i = 0; i < files.length; i++) {
-                  var name = files[i].name.toLowerCase();
-                  if (files[i].type === 'file') {
-                    for (var j = 0; j < supportedExt.length; j++) {
-                      if (name.endsWith(supportedExt[j])) {
-                        images.push(files[i].name);
-                        break;
-                      }
+          // Get default branch first
+          return getDefaultBranch(repo, token).then(function(branch) {
+            // Get all files from repo
+            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR);
+            return fetch(url, {
+              headers: {
+                'Authorization': 'token ' + token,
+                'Accept': 'application/vnd.github.v3+json'
+              }
+            }).then(function(res) {
+              if (!res.ok) {
+                return res.json().then(function(err) {
+                  throw new Error('Failed to list files: ' + (err.message || 'HTTP ' + res.status));
+                });
+              }
+              return res.json();
+            }).then(function(files) {
+              var images = [];
+              var supportedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+              for (var i = 0; i < files.length; i++) {
+                var name = files[i].name.toLowerCase();
+                if (files[i].type === 'file' && files[i].name.toLowerCase() !== 'manifest.json') {
+                  for (var j = 0; j < supportedExt.length; j++) {
+                    if (name.endsWith(supportedExt[j])) {
+                      images.push(files[i].name);
+                      break;
                     }
                   }
                 }
-                images.sort();
+              }
+              images.sort();
 
-                var manifestData = {
-                  generatedAt: new Date().toISOString(),
-                  count: images.length,
-                  images: images
+              var manifestData = {
+                generatedAt: new Date().toISOString(),
+                count: images.length,
+                images: images
+              };
+
+              var manifestPath = IMAGES_DIR + 'manifest.json';
+              var content = JSON.stringify(manifestData, null, 2) + '\n';
+              var base64 = btoa(unescape(encodeURIComponent(content)));
+
+              return getFileSha(repo, manifestPath, token, branch).then(function(sha) {
+                var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(manifestPath);
+                var body = {
+                  message: 'Update manifest.json',
+                  content: base64,
+                  branch: branch
                 };
+                if (sha) body.sha = sha;
 
-                var manifestPath = IMAGES_DIR + 'manifest.json';
-                var content = JSON.stringify(manifestData, null, 2) + '\n';
-                var base64 = btoa(unescape(encodeURIComponent(content)));
-
-                return getFileSha(repo, manifestPath, token).then(function(sha) {
-                  var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(manifestPath);
-                  var body = {
-                    message: 'Update manifest.json',
-                    content: base64,
-                    branch: 'main'
-                  };
-                  if (sha) body.sha = sha;
-
-                  return fetch(url, {
-                    method: 'PUT',
-                    headers: {
-                      'Authorization': 'token ' + token,
-                      'Accept': 'application/vnd.github.v3+json',
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(body)
-                  }).then(function(res) {
-                    if (!res.ok) {
-                      return res.json().then(function(err) {
-                        throw new Error(err.message || 'Update failed');
-                      });
-                    }
-                    return res.json();
-                  });
+                return fetch(url, {
+                  method: 'PUT',
+                  headers: {
+                    'Authorization': 'token ' + token,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(body)
+                }).then(function(res) {
+                  if (!res.ok) {
+                    return res.json().then(function(err) {
+                      throw new Error(err.message || 'Update failed: HTTP ' + res.status);
+                    });
+                  }
+                  return res.json();
                 });
               });
             });
+          });
         }
 
         function loadImageList() {
@@ -1007,7 +1044,9 @@
 
           imageList.innerHTML = '<div class="message info">Loading...</div>';
 
-          fetch(IMAGES_DIR + 'manifest.json', {cache: 'no-store'})
+          // Add cache busting timestamp
+          var cacheBuster = '?t=' + Date.now();
+          fetch(IMAGES_DIR + 'manifest.json' + cacheBuster, {cache: 'no-store'})
             .then(function(res) {
               if (!res.ok) throw new Error('Failed to load manifest');
               return res.json();
@@ -1045,11 +1084,22 @@
                   this.disabled = true;
                   this.textContent = 'Deleting...';
                   deleteFile(filename, token, repo).then(function() {
-                    showMessage(uploadStatus, 'Deleted ' + filename, 'success');
+                    showMessage(uploadStatus, 'Deleted ' + filename + '. Updating manifest...', 'success');
                     updateManifest(token, repo).then(function() {
-                      loadImageList();
-                      // Refresh the viewer
-                      if (window.refreshViewer) window.refreshViewer();
+                      showMessage(uploadStatus, 'Manifest updated! Refreshing...', 'success');
+                      // Wait a moment for GitHub Pages to update
+                      setTimeout(function() {
+                        loadImageList();
+                        // Refresh the viewer
+                        if (window.refreshViewer) window.refreshViewer();
+                      }, 2000);
+                    }).catch(function(err) {
+                      showMessage(uploadStatus, 'Manifest update failed: ' + err.message + '. You may need to refresh manually.', 'error');
+                      console.error('Manifest update error:', err);
+                      setTimeout(function() {
+                        loadImageList();
+                        if (window.refreshViewer) window.refreshViewer();
+                      }, 2000);
                     });
                   }).catch(function(err) {
                     showMessage(uploadStatus, 'Delete failed: ' + err.message, 'error');
