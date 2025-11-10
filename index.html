@@ -262,6 +262,9 @@
         <input type="file" id="fileInput" accept="image/*" multiple />
         <button id="uploadBtn" disabled>Upload Selected</button>
         <div id="uploadStatus"></div>
+        <div style="font-size: 11px; opacity: 0.7; margin-top: 8px; padding: 8px; background: rgba(100,50,0,0.2); border: 1px solid #733; border-radius: 4px;">
+          <strong>Note:</strong> Due to browser CORS restrictions, GitHub API calls may fail. If uploads work but manifest updates fail, you can manually run: <code>python scripts/generate_manifest.py</code> after uploading images.
+        </div>
       </div>
 
       <div class="section">
@@ -702,6 +705,10 @@
 
         var GITHUB_API = 'https://api.github.com';
         var IMAGES_DIR = 'images/';
+        // CORS proxy - you can use a public one or host your own
+        // For production, consider using a serverless function or your own proxy
+        var USE_CORS_PROXY = false; // Set to true and configure proxy URL if needed
+        var CORS_PROXY = ''; // e.g., 'https://cors-anywhere.herokuapp.com/' (requires setup)
 
         // Auto-detect repo from GitHub Pages URL
         function detectRepo() {
@@ -861,7 +868,8 @@
               // Get default branch and file SHA if exists (for update)
               getDefaultBranch(repo, token).then(function(branch) {
                 return getFileSha(repo, path, token, branch).then(function(sha) {
-                  var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
+                  var endpoint = '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
+                  var url = buildApiUrl(endpoint);
                   var body = {
                     message: 'Add/update image: ' + filename,
                     content: base64,
@@ -869,13 +877,19 @@
                   };
                   if (sha) body.sha = sha;
 
+                  var headers = {
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                  };
+                  if (token) {
+                    headers['Authorization'] = 'token ' + token;
+                  }
+
                   return fetch(url, {
                     method: 'PUT',
-                    headers: {
-                      'Authorization': 'token ' + token,
-                      'Accept': 'application/vnd.github.v3+json',
-                      'Content-Type': 'application/json'
-                    },
+                    headers: headers,
+                    mode: 'cors',
+                    credentials: 'omit',
                     body: JSON.stringify(body)
                   }).then(function(res) {
                     if (!res.ok) {
@@ -899,13 +913,20 @@
         }
 
         function getFileSha(repo, path, token, branch) {
-          var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
-          if (branch) url += '?ref=' + encodeURIComponent(branch);
+          var endpoint = '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
+          if (branch) endpoint += '?ref=' + encodeURIComponent(branch);
+          var url = buildApiUrl(endpoint);
+          var headers = {
+            'Accept': 'application/vnd.github.v3+json'
+          };
+          if (token) {
+            headers['Authorization'] = 'token ' + token;
+          }
           return fetch(url, {
-            headers: {
-              'Authorization': 'token ' + token,
-              'Accept': 'application/vnd.github.v3+json'
-            }
+            method: 'GET',
+            headers: headers,
+            mode: 'cors',
+            credentials: 'omit'
           }).then(function(res) {
             if (res.status === 404) return null;
             if (!res.ok) throw new Error('Failed to check file');
@@ -922,14 +943,20 @@
               if (!sha) {
                 throw new Error('File not found');
               }
-              var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
+              var endpoint = '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
+              var url = buildApiUrl(endpoint);
+              var headers = {
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+              };
+              if (token) {
+                headers['Authorization'] = 'token ' + token;
+              }
               return fetch(url, {
                 method: 'DELETE',
-                headers: {
-                  'Authorization': 'token ' + token,
-                  'Accept': 'application/vnd.github.v3+json',
-                  'Content-Type': 'application/json'
-                },
+                headers: headers,
+                mode: 'cors',
+                credentials: 'omit',
                 body: JSON.stringify({
                   message: 'Delete image: ' + filename,
                   sha: sha,
@@ -949,11 +976,19 @@
 
         function getDefaultBranch(repo, token) {
           // Try to get default branch from repo info
-          return fetch(GITHUB_API + '/repos/' + encodeURIComponent(repo), {
-            headers: {
-              'Authorization': 'token ' + token,
-              'Accept': 'application/vnd.github.v3+json'
-            }
+          var endpoint = '/repos/' + encodeURIComponent(repo);
+          var url = buildApiUrl(endpoint);
+          var headers = {
+            'Accept': 'application/vnd.github.v3+json'
+          };
+          if (token) {
+            headers['Authorization'] = 'token ' + token;
+          }
+          return fetch(url, {
+            method: 'GET',
+            headers: headers,
+            mode: 'cors',
+            credentials: 'omit'
           }).then(function(res) {
             if (!res.ok) {
               console.warn('Could not get default branch, using "main"');
@@ -970,19 +1005,45 @@
           });
         }
 
+        function buildApiUrl(endpoint) {
+          var url = GITHUB_API + endpoint;
+          if (USE_CORS_PROXY && CORS_PROXY) {
+            url = CORS_PROXY + url;
+          }
+          return url;
+        }
+
         function updateManifest(token, repo) {
+          // Validate repo format
+          if (!repo || repo.indexOf('/') === -1) {
+            throw new Error('Invalid repository format. Use: owner/repo-name');
+          }
+          
           // Get default branch first
           return getDefaultBranch(repo, token).then(function(branch) {
             // Get all files from repo (specify branch)
             // Remove trailing slash for GitHub API
             var imagesPath = IMAGES_DIR.replace(/\/$/, '');
-            var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(imagesPath) + '?ref=' + encodeURIComponent(branch);
+            var endpoint = '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(imagesPath) + '?ref=' + encodeURIComponent(branch);
+            var url = buildApiUrl(endpoint);
             console.log('Fetching files from:', url);
+            console.log('Repo:', repo, 'Branch:', branch);
+            
+            var headers = {
+              'Accept': 'application/vnd.github.v3+json'
+            };
+            
+            // Add auth header - but note: this may cause CORS issues
+            // GitHub API doesn't support CORS for authenticated requests from browsers
+            if (token) {
+              headers['Authorization'] = 'token ' + token;
+            }
+            
             return fetch(url, {
-              headers: {
-                'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json'
-              }
+              method: 'GET',
+              headers: headers,
+              mode: 'cors',
+              credentials: 'omit'
             }).then(function(res) {
               if (!res.ok) {
                 return res.json().then(function(err) {
@@ -994,7 +1055,13 @@
               return res.json();
             }).catch(function(err) {
               console.error('Error listing files:', err);
-              throw new Error('Network error listing files: ' + (err.message || 'Unknown error'));
+              var errorMsg = err.message || 'Unknown error';
+              if (errorMsg.indexOf('CORS') !== -1 || errorMsg.indexOf('NetworkError') !== -1) {
+                throw new Error('CORS Error: GitHub API doesn\'t allow authenticated requests from browsers. ' +
+                  'This is a browser security limitation. Solutions: 1) Use the Python script to update manifest.json manually, ' +
+                  '2) Set up a CORS proxy, or 3) Use a serverless function as a proxy.');
+              }
+              throw new Error('Network error listing files: ' + errorMsg);
             }).then(function(files) {
               var images = [];
               var supportedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
@@ -1022,7 +1089,8 @@
               var base64 = btoa(unescape(encodeURIComponent(content)));
 
               return getFileSha(repo, manifestPath, token, branch).then(function(sha) {
-                var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(manifestPath);
+                var endpoint = '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(manifestPath);
+                var url = buildApiUrl(endpoint);
                 var body = {
                   message: 'Update manifest.json',
                   content: base64,
@@ -1030,13 +1098,19 @@
                 };
                 if (sha) body.sha = sha;
 
+                var headers = {
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Content-Type': 'application/json'
+                };
+                if (token) {
+                  headers['Authorization'] = 'token ' + token;
+                }
+
                 return fetch(url, {
                   method: 'PUT',
-                  headers: {
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                  },
+                  headers: headers,
+                  mode: 'cors',
+                  credentials: 'omit',
                   body: JSON.stringify(body)
                 }).then(function(res) {
                   if (!res.ok) {
