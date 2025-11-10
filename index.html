@@ -70,6 +70,155 @@
       #status { margin-left: auto; opacity: 0.8; }
       #help { font-size: 12px; opacity: 0.8; }
 
+      /* Management Panel */
+      #manageBtn {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 100;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 6px;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 200ms;
+      }
+      #manageBtn:hover { background: rgba(0,0,0,0.95); }
+      #managePanel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 400px;
+        max-width: 90vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.95);
+        border-left: 1px solid #333;
+        z-index: 99;
+        transform: translateX(100%);
+        transition: transform 300ms ease-out;
+        overflow-y: auto;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+      #managePanel.open { transform: translateX(0); }
+      #managePanel h2 {
+        margin: 0 0 20px 0;
+        font-size: 20px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 10px;
+      }
+      #managePanel .section {
+        margin-bottom: 24px;
+      }
+      #managePanel label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 13px;
+        opacity: 0.9;
+      }
+      #managePanel input[type="text"],
+      #managePanel input[type="password"],
+      #managePanel input[type="file"] {
+        width: 100%;
+        padding: 8px;
+        background: #111;
+        color: #fff;
+        border: 1px solid #333;
+        border-radius: 4px;
+        box-sizing: border-box;
+        font-size: 13px;
+      }
+      #managePanel input[type="file"] {
+        padding: 4px;
+        cursor: pointer;
+      }
+      #managePanel button {
+        width: 100%;
+        padding: 10px;
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #444;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-top: 8px;
+        transition: background 200ms;
+      }
+      #managePanel button:hover { background: #2a2a2a; }
+      #managePanel button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #managePanel button.danger {
+        background: #4a1a1a;
+        border-color: #733;
+      }
+      #managePanel button.danger:hover { background: #5a2a2a; }
+      #managePanel .image-list {
+        margin-top: 12px;
+      }
+      #managePanel .image-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px;
+        background: #111;
+        border: 1px solid #222;
+        border-radius: 4px;
+        margin-bottom: 8px;
+      }
+      #managePanel .image-item img {
+        width: 60px;
+        height: 60px;
+        object-fit: cover;
+        border-radius: 4px;
+        border: 1px solid #333;
+      }
+      #managePanel .image-item .info {
+        flex: 1;
+        min-width: 0;
+      }
+      #managePanel .image-item .name {
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 4px;
+      }
+      #managePanel .image-item .size {
+        font-size: 11px;
+        opacity: 0.6;
+      }
+      #managePanel .image-item button {
+        width: auto;
+        padding: 6px 12px;
+        margin: 0;
+        font-size: 12px;
+      }
+      #managePanel .message {
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+      #managePanel .message.success {
+        background: rgba(0,100,0,0.3);
+        border: 1px solid #0a0;
+        color: #afa;
+      }
+      #managePanel .message.error {
+        background: rgba(100,0,0,0.3);
+        border: 1px solid #a00;
+        color: #faa;
+      }
+      #managePanel .message.info {
+        background: rgba(0,50,100,0.3);
+        border: 1px solid #05a;
+        color: #aaf;
+      }
+
       a, a:visited { color: #9ad; }
 
       /* No mouse on TVs; keep controls visible initially */
@@ -82,6 +231,44 @@
     <div id="viewer" aria-live="off">
       <div class="layer" id="layerA"><img alt="" /></div>
       <div class="layer" id="layerB"><img alt="" /></div>
+    </div>
+
+    <button id="manageBtn" title="Image Management">⚙️ Manage</button>
+
+    <div id="managePanel">
+      <h2>Image Management</h2>
+      
+      <div class="section">
+        <label>GitHub Personal Access Token</label>
+        <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxx" />
+        <button id="saveTokenBtn">Save Token</button>
+        <div style="font-size: 11px; opacity: 0.7; margin-top: 8px;">
+          Create a token at: <a href="https://github.com/settings/tokens" target="_blank" style="color: #9ad;">github.com/settings/tokens</a><br/>
+          Required scopes: <code>repo</code> (full control of private repositories)
+        </div>
+      </div>
+
+      <div class="section">
+        <label>GitHub Repository</label>
+        <input type="text" id="githubRepo" placeholder="username/repo-name" />
+        <button id="saveRepoBtn">Save Repo</button>
+        <div style="font-size: 11px; opacity: 0.7; margin-top: 8px;">
+          Format: owner/repository (e.g., yourusername/srfimageviewer_01)
+        </div>
+      </div>
+
+      <div class="section">
+        <label>Upload New Image</label>
+        <input type="file" id="fileInput" accept="image/*" multiple />
+        <button id="uploadBtn" disabled>Upload Selected</button>
+        <div id="uploadStatus"></div>
+      </div>
+
+      <div class="section">
+        <h3 style="margin: 0 0 12px 0; font-size: 16px;">Current Images</h3>
+        <button id="refreshListBtn">Refresh List</button>
+        <div id="imageList" class="image-list"></div>
+      </div>
     </div>
 
     <div id="controls" class="hidden" role="group" aria-label="Controls">
@@ -483,11 +670,405 @@
           });
         }
 
+        // Expose start function globally for management panel
+        window.refreshViewer = function() {
+          pause();
+          start(true);
+        };
+
         // Boot
         initKeyboard();
         wireControls();
         autoHideControls();
         start();
+      })();
+
+      // Management Panel
+      (function() {
+        var manageBtn = document.getElementById('manageBtn');
+        var managePanel = document.getElementById('managePanel');
+        var githubTokenInput = document.getElementById('githubToken');
+        var githubRepoInput = document.getElementById('githubRepo');
+        var saveTokenBtn = document.getElementById('saveTokenBtn');
+        var saveRepoBtn = document.getElementById('saveRepoBtn');
+        var fileInput = document.getElementById('fileInput');
+        var uploadBtn = document.getElementById('uploadBtn');
+        var uploadStatus = document.getElementById('uploadStatus');
+        var refreshListBtn = document.getElementById('refreshListBtn');
+        var imageList = document.getElementById('imageList');
+
+        var GITHUB_API = 'https://api.github.com';
+        var IMAGES_DIR = 'images/';
+
+        // Auto-detect repo from GitHub Pages URL
+        function detectRepo() {
+          try {
+            var host = window.location.hostname;
+            if (host.endsWith('.github.io')) {
+              var parts = host.split('.');
+              if (parts.length >= 2) {
+                var username = parts[0];
+                var pathname = window.location.pathname.split('/').filter(function(p) { return p; });
+                var repoName = pathname.length > 0 ? pathname[0] : null;
+                if (repoName) {
+                  return username + '/' + repoName;
+                }
+                // If no path, repo name might be in the host
+                return username + '/' + username + '.github.io';
+              }
+            }
+          } catch(e) {}
+          return null;
+        }
+
+        // Load saved settings
+        function loadSettings() {
+          try {
+            var token = localStorage.getItem('github_token');
+            var repo = localStorage.getItem('github_repo') || detectRepo();
+            if (token) githubTokenInput.value = token;
+            if (repo) githubRepoInput.value = repo;
+          } catch(e) {}
+        }
+
+        function getToken() {
+          return githubTokenInput.value.trim() || localStorage.getItem('github_token') || '';
+        }
+
+        function getRepo() {
+          return githubRepoInput.value.trim() || localStorage.getItem('github_repo') || '';
+        }
+
+        function showMessage(el, msg, type) {
+          el.innerHTML = '<div class="message ' + type + '">' + msg + '</div>';
+          setTimeout(function() { el.innerHTML = ''; }, 5000);
+        }
+
+        // Toggle panel
+        manageBtn.addEventListener('click', function() {
+          managePanel.classList.toggle('open');
+        });
+
+        // Save token
+        saveTokenBtn.addEventListener('click', function() {
+          var token = githubTokenInput.value.trim();
+          if (!token) {
+            showMessage(uploadStatus, 'Please enter a token', 'error');
+            return;
+          }
+          try {
+            localStorage.setItem('github_token', token);
+            showMessage(uploadStatus, 'Token saved', 'success');
+          } catch(e) {
+            showMessage(uploadStatus, 'Failed to save token: ' + e.message, 'error');
+          }
+        });
+
+        // Save repo
+        saveRepoBtn.addEventListener('click', function() {
+          var repo = githubRepoInput.value.trim();
+          if (!repo || repo.indexOf('/') === -1) {
+            showMessage(uploadStatus, 'Please enter a valid repo (owner/repo)', 'error');
+            return;
+          }
+          try {
+            localStorage.setItem('github_repo', repo);
+            showMessage(uploadStatus, 'Repository saved', 'success');
+            loadImageList();
+          } catch(e) {
+            showMessage(uploadStatus, 'Failed to save repo: ' + e.message, 'error');
+          }
+        });
+
+        // File input change
+        fileInput.addEventListener('change', function() {
+          uploadBtn.disabled = !this.files || this.files.length === 0;
+        });
+
+        // Upload files
+        uploadBtn.addEventListener('click', function() {
+          var files = fileInput.files;
+          if (!files || files.length === 0) return;
+
+          var token = getToken();
+          var repo = getRepo();
+          if (!token || !repo) {
+            showMessage(uploadStatus, 'Please configure token and repository first', 'error');
+            return;
+          }
+
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploading...';
+          uploadStatus.innerHTML = '<div class="message info">Uploading ' + files.length + ' file(s)...</div>';
+
+          var uploadPromises = [];
+          for (var i = 0; i < files.length; i++) {
+            uploadPromises.push(uploadFile(files[i], token, repo));
+          }
+
+          Promise.all(uploadPromises).then(function(results) {
+            var success = 0, failed = 0;
+            for (var j = 0; j < results.length; j++) {
+              if (results[j].success) success++;
+              else failed++;
+            }
+            var msg = 'Uploaded ' + success + ' file(s)';
+            if (failed > 0) msg += ', ' + failed + ' failed';
+            showMessage(uploadStatus, msg, failed > 0 ? 'error' : 'success');
+            fileInput.value = '';
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Upload Selected';
+            if (success > 0) {
+              updateManifest(token, repo).then(function() {
+                loadImageList();
+                // Refresh the viewer
+                if (window.refreshViewer) window.refreshViewer();
+              });
+            }
+          }).catch(function(err) {
+            showMessage(uploadStatus, 'Upload error: ' + err.message, 'error');
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Upload Selected';
+          });
+        });
+
+        function uploadFile(file, token, repo) {
+          return new Promise(function(resolve) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+              var content = e.target.result;
+              var base64 = content.split(',')[1];
+              var filename = file.name;
+              var path = IMAGES_DIR + filename;
+
+              // Get file SHA if exists (for update)
+              getFileSha(repo, path, token).then(function(sha) {
+                var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+                var body = {
+                  message: 'Add/update image: ' + filename,
+                  content: base64,
+                  branch: 'main'
+                };
+                if (sha) body.sha = sha;
+
+                fetch(url, {
+                  method: 'PUT',
+                  headers: {
+                    'Authorization': 'token ' + token,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(body)
+                }).then(function(res) {
+                  if (!res.ok) {
+                    return res.json().then(function(err) {
+                      throw new Error(err.message || 'Upload failed');
+                    });
+                  }
+                  return res.json();
+                }).then(function(data) {
+                  resolve({success: true, filename: filename});
+                }).catch(function(err) {
+                  resolve({success: false, filename: filename, error: err.message});
+                });
+              }).catch(function(err) {
+                resolve({success: false, filename: filename, error: err.message});
+              });
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+
+        function getFileSha(repo, path, token) {
+          var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+          return fetch(url, {
+            headers: {
+              'Authorization': 'token ' + token,
+              'Accept': 'application/vnd.github.v3+json'
+            }
+          }).then(function(res) {
+            if (res.status === 404) return null;
+            if (!res.ok) throw new Error('Failed to check file');
+            return res.json().then(function(data) {
+              return data.sha || null;
+            });
+          });
+        }
+
+        function deleteFile(filename, token, repo) {
+          var path = IMAGES_DIR + filename;
+          return getFileSha(repo, path, token).then(function(sha) {
+            if (!sha) {
+              throw new Error('File not found');
+            }
+            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+            return fetch(url, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': 'token ' + token,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                message: 'Delete image: ' + filename,
+                sha: sha,
+                branch: 'main'
+              })
+            }).then(function(res) {
+              if (!res.ok) {
+                return res.json().then(function(err) {
+                  throw new Error(err.message || 'Delete failed');
+                });
+              }
+              return res.json();
+            });
+          });
+        }
+
+        function updateManifest(token, repo) {
+          // Load current manifest or get file list
+          return fetch(IMAGES_DIR + 'manifest.json', {cache: 'no-store'})
+            .then(function(res) { return res.ok ? res.json() : null; })
+            .catch(function() { return null; })
+            .then(function(manifest) {
+              // Get all files from repo
+              var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR);
+              return fetch(url, {
+                headers: {
+                  'Authorization': 'token ' + token,
+                  'Accept': 'application/vnd.github.v3+json'
+                }
+              }).then(function(res) {
+                if (!res.ok) throw new Error('Failed to list files');
+                return res.json();
+              }).then(function(files) {
+                var images = [];
+                var supportedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+                for (var i = 0; i < files.length; i++) {
+                  var name = files[i].name.toLowerCase();
+                  if (files[i].type === 'file') {
+                    for (var j = 0; j < supportedExt.length; j++) {
+                      if (name.endsWith(supportedExt[j])) {
+                        images.push(files[i].name);
+                        break;
+                      }
+                    }
+                  }
+                }
+                images.sort();
+
+                var manifestData = {
+                  generatedAt: new Date().toISOString(),
+                  count: images.length,
+                  images: images
+                };
+
+                var manifestPath = IMAGES_DIR + 'manifest.json';
+                var content = JSON.stringify(manifestData, null, 2) + '\n';
+                var base64 = btoa(unescape(encodeURIComponent(content)));
+
+                return getFileSha(repo, manifestPath, token).then(function(sha) {
+                  var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(manifestPath);
+                  var body = {
+                    message: 'Update manifest.json',
+                    content: base64,
+                    branch: 'main'
+                  };
+                  if (sha) body.sha = sha;
+
+                  return fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                      'Authorization': 'token ' + token,
+                      'Accept': 'application/vnd.github.v3+json',
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                  }).then(function(res) {
+                    if (!res.ok) {
+                      return res.json().then(function(err) {
+                        throw new Error(err.message || 'Update failed');
+                      });
+                    }
+                    return res.json();
+                  });
+                });
+              });
+            });
+        }
+
+        function loadImageList() {
+          var token = getToken();
+          var repo = getRepo();
+          if (!token || !repo) {
+            imageList.innerHTML = '<div class="message info">Configure token and repository to view images</div>';
+            return;
+          }
+
+          imageList.innerHTML = '<div class="message info">Loading...</div>';
+
+          fetch(IMAGES_DIR + 'manifest.json', {cache: 'no-store'})
+            .then(function(res) {
+              if (!res.ok) throw new Error('Failed to load manifest');
+              return res.json();
+            })
+            .then(function(manifest) {
+              var images = manifest.images || [];
+              if (images.length === 0) {
+                imageList.innerHTML = '<div class="message info">No images found</div>';
+                return;
+              }
+
+              imageList.innerHTML = '';
+              for (var i = 0; i < images.length; i++) {
+                var imgName = images[i];
+                var imgUrl = IMAGES_DIR + imgName;
+                var item = document.createElement('div');
+                item.className = 'image-item';
+                item.innerHTML = 
+                  '<img src="' + imgUrl + '" alt="' + imgName + '" onerror="this.style.display=\'none\'" />' +
+                  '<div class="info">' +
+                    '<div class="name">' + imgName + '</div>' +
+                    '<div class="size">Image ' + (i + 1) + ' of ' + images.length + '</div>' +
+                  '</div>' +
+                  '<button class="danger" data-filename="' + imgName + '">Delete</button>';
+                imageList.appendChild(item);
+              }
+
+              // Attach delete handlers
+              var deleteBtns = imageList.querySelectorAll('button.danger');
+              for (var j = 0; j < deleteBtns.length; j++) {
+                deleteBtns[j].addEventListener('click', function() {
+                  var filename = this.getAttribute('data-filename');
+                  if (!confirm('Delete ' + filename + '?')) return;
+
+                  this.disabled = true;
+                  this.textContent = 'Deleting...';
+                  deleteFile(filename, token, repo).then(function() {
+                    showMessage(uploadStatus, 'Deleted ' + filename, 'success');
+                    updateManifest(token, repo).then(function() {
+                      loadImageList();
+                      // Refresh the viewer
+                      if (window.refreshViewer) window.refreshViewer();
+                    });
+                  }).catch(function(err) {
+                    showMessage(uploadStatus, 'Delete failed: ' + err.message, 'error');
+                    this.disabled = false;
+                    this.textContent = 'Delete';
+                  }.bind(this));
+                });
+              }
+            })
+            .catch(function(err) {
+              imageList.innerHTML = '<div class="message error">Failed to load images: ' + err.message + '</div>';
+            });
+        }
+
+        refreshListBtn.addEventListener('click', loadImageList);
+
+        // Initialize
+        loadSettings();
+        loadImageList();
       })();
     </script>
     <noscript>JavaScript is required to run the slideshow.</noscript>
