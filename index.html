@@ -861,7 +861,7 @@
               // Get default branch and file SHA if exists (for update)
               getDefaultBranch(repo, token).then(function(branch) {
                 return getFileSha(repo, path, token, branch).then(function(sha) {
-                  var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+                  var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
                   var body = {
                     message: 'Add/update image: ' + filename,
                     content: base64,
@@ -899,7 +899,7 @@
         }
 
         function getFileSha(repo, path, token, branch) {
-          var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+          var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
           if (branch) url += '?ref=' + encodeURIComponent(branch);
           return fetch(url, {
             headers: {
@@ -922,7 +922,7 @@
               if (!sha) {
                 throw new Error('File not found');
               }
-              var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(path);
+              var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(path);
               return fetch(url, {
                 method: 'DELETE',
                 headers: {
@@ -949,7 +949,7 @@
 
         function getDefaultBranch(repo, token) {
           // Try to get default branch from repo info
-          return fetch(GITHUB_API + '/repos/' + repo, {
+          return fetch(GITHUB_API + '/repos/' + encodeURIComponent(repo), {
             headers: {
               'Authorization': 'token ' + token,
               'Accept': 'application/vnd.github.v3+json'
@@ -974,7 +974,10 @@
           // Get default branch first
           return getDefaultBranch(repo, token).then(function(branch) {
             // Get all files from repo (specify branch)
-            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR) + '?ref=' + encodeURIComponent(branch);
+            // Remove trailing slash for GitHub API
+            var imagesPath = IMAGES_DIR.replace(/\/$/, '');
+            var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(imagesPath) + '?ref=' + encodeURIComponent(branch);
+            console.log('Fetching files from:', url);
             return fetch(url, {
               headers: {
                 'Authorization': 'token ' + token,
@@ -1019,7 +1022,7 @@
               var base64 = btoa(unescape(encodeURIComponent(content)));
 
               return getFileSha(repo, manifestPath, token, branch).then(function(sha) {
-                var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(manifestPath);
+                var url = GITHUB_API + '/repos/' + encodeURIComponent(repo) + '/contents/' + encodeURIComponent(manifestPath);
                 var body = {
                   message: 'Update manifest.json',
                   content: base64,
