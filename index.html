@@ -267,6 +267,7 @@
       <div class="section">
         <h3 style="margin: 0 0 12px 0; font-size: 16px;">Current Images</h3>
         <button id="refreshListBtn">Refresh List</button>
+        <button id="updateManifestBtn" style="margin-top: 8px;">Update Manifest</button>
         <div id="imageList" class="image-list"></div>
       </div>
     </div>
@@ -696,6 +697,7 @@
         var uploadBtn = document.getElementById('uploadBtn');
         var uploadStatus = document.getElementById('uploadStatus');
         var refreshListBtn = document.getElementById('refreshListBtn');
+        var updateManifestBtn = document.getElementById('updateManifestBtn');
         var imageList = document.getElementById('imageList');
 
         var GITHUB_API = 'https://api.github.com';
@@ -830,13 +832,14 @@
                   if (window.refreshViewer) window.refreshViewer();
                 }, 2000);
               }).catch(function(err) {
-                showMessage(uploadStatus, 'Manifest update failed: ' + err.message + '. You may need to refresh manually.', 'error');
+                var errMsg = err.message || 'Unknown error';
+                showMessage(uploadStatus, 'Manifest update failed: ' + errMsg + '. Image uploaded but manifest not updated. Refreshing anyway...', 'error');
                 console.error('Manifest update error:', err);
-                // Still try to refresh the list
+                // Still try to refresh - the image is there, just need to wait longer
                 setTimeout(function() {
                   loadImageList();
                   if (window.refreshViewer) window.refreshViewer();
-                }, 2000);
+                }, 5000); // Wait longer since manifest might not be updated
               });
             }
           }).catch(function(err) {
@@ -952,11 +955,17 @@
               'Accept': 'application/vnd.github.v3+json'
             }
           }).then(function(res) {
-            if (!res.ok) return 'main'; // fallback
+            if (!res.ok) {
+              console.warn('Could not get default branch, using "main"');
+              return 'main'; // fallback
+            }
             return res.json().then(function(data) {
               return data.default_branch || 'main';
+            }).catch(function() {
+              return 'main'; // fallback
             });
-          }).catch(function() {
+          }).catch(function(err) {
+            console.warn('Error getting default branch:', err, '- using "main"');
             return 'main'; // fallback
           });
         }
@@ -964,8 +973,8 @@
         function updateManifest(token, repo) {
           // Get default branch first
           return getDefaultBranch(repo, token).then(function(branch) {
-            // Get all files from repo
-            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR);
+            // Get all files from repo (specify branch)
+            var url = GITHUB_API + '/repos/' + repo + '/contents/' + encodeURIComponent(IMAGES_DIR) + '?ref=' + encodeURIComponent(branch);
             return fetch(url, {
               headers: {
                 'Authorization': 'token ' + token,
@@ -975,9 +984,14 @@
               if (!res.ok) {
                 return res.json().then(function(err) {
                   throw new Error('Failed to list files: ' + (err.message || 'HTTP ' + res.status));
+                }).catch(function() {
+                  throw new Error('Failed to list files: HTTP ' + res.status);
                 });
               }
               return res.json();
+            }).catch(function(err) {
+              console.error('Error listing files:', err);
+              throw new Error('Network error listing files: ' + (err.message || 'Unknown error'));
             }).then(function(files) {
               var images = [];
               var supportedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
@@ -1025,12 +1039,26 @@
                   if (!res.ok) {
                     return res.json().then(function(err) {
                       throw new Error(err.message || 'Update failed: HTTP ' + res.status);
+                    }).catch(function() {
+                      throw new Error('Update failed: HTTP ' + res.status);
                     });
                   }
                   return res.json();
+                }).catch(function(err) {
+                  console.error('Error updating manifest:', err);
+                  throw new Error('Network error updating manifest: ' + (err.message || 'Unknown error'));
                 });
+              }).catch(function(err) {
+                console.error('Error getting file SHA:', err);
+                throw err;
               });
+            }).catch(function(err) {
+              console.error('Error processing files:', err);
+              throw err;
             });
+          }).catch(function(err) {
+            console.error('Error in updateManifest:', err);
+            throw err;
           });
         }
 
@@ -1115,6 +1143,33 @@
         }
 
         refreshListBtn.addEventListener('click', loadImageList);
+
+        // Manual manifest update button
+        updateManifestBtn.addEventListener('click', function() {
+          var token = getToken();
+          var repo = getRepo();
+          if (!token || !repo) {
+            showMessage(uploadStatus, 'Please configure token and repository first', 'error');
+            return;
+          }
+          this.disabled = true;
+          this.textContent = 'Updating...';
+          showMessage(uploadStatus, 'Updating manifest...', 'info');
+          updateManifest(token, repo).then(function() {
+            showMessage(uploadStatus, 'Manifest updated successfully!', 'success');
+            setTimeout(function() {
+              loadImageList();
+              if (window.refreshViewer) window.refreshViewer();
+            }, 2000);
+          }).catch(function(err) {
+            var errMsg = err.message || 'Unknown error';
+            showMessage(uploadStatus, 'Failed: ' + errMsg + '. Check console for details.', 'error');
+            console.error('Manual manifest update error:', err);
+          }).finally(function() {
+            updateManifestBtn.disabled = false;
+            updateManifestBtn.textContent = 'Update Manifest';
+          });
+        });
 
         // Initialize
         loadSettings();
